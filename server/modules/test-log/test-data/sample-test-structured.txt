@@ -1,0 +1,21 @@
+ProdName:CORN5_2054D
+ProdCode:
+SerialNumber:2
+TestUser:调试用户
+TestRack:CJ001725-02
+TestFixture:CJ001725-02
+Cavity:1
+TestTime:20250915184748
+TestResult:PASS
+SoftwareVersion:
+Step Item Range TestValue Result
+1 输入端X32高电平 1~ 1 Pass
+2 闭合继电器6 ~ True Pass
+3 上电 ~ True Pass
+4 延时2s ~ True Pass
+5 打开电源 ~ True Pass
+6 延时3s ~ True Pass
+7 +12V 11.5~12.5 12.039 Pass
+8 M_3.3V 3.2~3.4 3.315 Pass
+9 版本 CL2552_BrushPCB_HC32F005_0.0.0.2~ CL2552_BrushPCB_HC32F005_0.0.0.2 Pass
+10 直立状态 0~ 0 Pass

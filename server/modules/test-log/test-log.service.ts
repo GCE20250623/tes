@@ -12,6 +12,7 @@
  * - 时间戳格式日志
  * - CSV格式测试结果
  * - Excel格式测试结果
+ * - 结构化测试日志（包含头部信息和步骤表格）
  */
 
 import { Injectable } from '@nestjs/common';
@@ -51,6 +52,9 @@ export interface LogAnalysisResult {
   
   /** 测试汇总信息 */
   summary: TestSummary;
+
+  /** 额外信息（针对特定格式） */
+  metadata?: Record<string, string>;
 }
 
 /**
@@ -74,6 +78,10 @@ export interface TestCase {
   
   /** 执行时间戳 */
   timestamp?: string;
+  
+  /** 额外字段（用于特定格式） */
+  range?: string;
+  testValue?: string;
 }
 
 /**
@@ -133,16 +141,15 @@ export class TestLogService {
 
   /**
    * 解析日志内容
-   * 支持多种日志格式：
-   * - 标准格式：[001] Test Name - PASS - 150ms
-   * - 符号格式：✓ Test Name (PASS)
-   * - 时间戳格式：2026-03-26 10:00:01 | Test Name - PASS
-   * 
-   * @param content - 日志文本内容
-   * @param filename - 文件名
-   * @returns 解析后的分析结果
+   * 支持多种日志格式
    */
   private parseLog(content: string, filename: string): LogAnalysisResult {
+    // 检测是否为结构化格式（包含 ProdName:, Step Item Range 等）
+    if (this.isStructuredFormat(content)) {
+      return this.parseStructuredLog(content, filename);
+    }
+    
+    // 按行分割日志内容
     const lines = content.split('\n');
     const testCases: TestCase[] = [];
     const errors: string[] = [];
@@ -155,22 +162,13 @@ export class TestLogService {
     let startTime: string | undefined;
     let endTime: string | undefined;
 
-    // 遍历每一行日志，解析测试结果
     for (const line of lines) {
-      // 匹配模式：
-      // passMatch: 匹配通过标记（✓, PASS, 成功, 通过, passed）
-      // failMatch: 匹配失败标记（✗, FAIL, 失败, failed）
-      // timeMatch: 匹配耗时（150ms 或 1.5s）
-      // idMatch: 匹配测试ID（[001], (001), #001）
-      // nameMatch: 匹配测试名称（test: xxx）
-      
-      const passMatch = line.match(/✓|PASS|成功|通过|passed/i);
-      const failMatch = line.match(/✗|FAIL|失败|failed/i);
+      const passMatch = line.match(/✓|PASS|成功|通过|passed|Pass/i);
+      const failMatch = line.match(/✗|FAIL|失败|failed|Fail/i);
       const timeMatch = line.match(/(\d+)ms|(\d+\.?\d*)s/);
       const idMatch = line.match(/\[(\d+)\]|\((\d+)\)|#(\d+)/);
       const nameMatch = line.match(/test[:\s]+(.+)/i);
       
-      // 判断是通过还是失败
       if (passMatch && !failMatch) {
         totalTests++;
         passedTests++;
@@ -212,7 +210,6 @@ export class TestLogService {
         });
       }
 
-      // 提取时间戳 - 匹配格式：2026-03-26 10:00:01 或 2026-03-26T10:00:01
       const tsMatch = line.match(/(\d{4}-\d{2}-\d{2}[T\s]\d{2}:\d{2}:\d{2})/);
       if (tsMatch) {
         if (!startTime) startTime = tsMatch[1];
@@ -225,7 +222,6 @@ export class TestLogService {
       return this.parseExcelData(content, filename);
     }
 
-    // 计算通过率
     const passRate = totalTests > 0 ? (passedTests / totalTests * 100).toFixed(2) : '0';
 
     return {
@@ -251,12 +247,119 @@ export class TestLogService {
   }
 
   /**
+   * 检测是否为结构化格式
+   * 结构化格式包含：ProdName:, Step Item Range 等标记
+   */
+  private isStructuredFormat(content: string): boolean {
+    return content.includes('ProdName:') && 
+           content.includes('Step Item Range') &&
+           content.includes('TestResult:');
+  }
+
+  /**
+   * 解析结构化测试日志格式
+   * 格式示例：
+   * ProdName:CORN5_2054D
+   * SerialNumber:2
+   * TestResult:PASS
+   * Step Item Range TestValue Result
+   * 1 输入端X32高电平 1~ 1 Pass
+   */
+  private parseStructuredLog(content: string, filename: string): LogAnalysisResult {
+    const lines = content.split('\n');
+    const testCases: TestCase[] = [];
+    const errors: string[] = [];
+    const metadata: Record<string, string> = {};
+    
+    let totalTests = 0;
+    let passedTests = 0;
+    let failedTests = 0;
+    let startTime: string | undefined;
+    let endTime: string | undefined;
+    let overallResult = 'UNKNOWN';
+
+    // 解析头部信息
+    for (const line of lines) {
+      const trimmedLine = line.trim();
+      
+      // 跳过空行和步骤表头
+      if (!trimmedLine || trimmedLine.startsWith('Step Item')) continue;
+      
+      // 解析 ProdName:xxx 格式
+      const keyValueMatch = trimmedLine.match(/^([^:]+):(.*)$/);
+      if (keyValueMatch) {
+        const [, key, value] = keyValueMatch;
+        metadata[key.trim()] = value.trim();
+        
+        // 提取特定字段
+        if (key === 'TestResult') {
+          overallResult = value.trim().toUpperCase();
+        } else if (key === 'TestTime') {
+          // 解析时间格式：20250915184748 -> 2025-09-15 18:47:48
+          const timeMatch = trimmedLine.match(/(\d{4})(\d{2})(\d{2})(\d{2})(\d{2})(\d{2})/);
+          if (timeMatch) {
+            startTime = `${timeMatch[1]}-${timeMatch[2]}-${timeMatch[3]} ${timeMatch[4]}:${timeMatch[5]}:${timeMatch[6]}`;
+            endTime = startTime;
+          }
+        }
+      }
+    }
+
+    // 解析步骤表格
+    // 格式：1 输入端X32高电平 1~ 1 Pass
+    const stepRegex = /^(\d+)\s+(.+?)\s+([\d.~]+|~)\s+([\d.ONtrueFalsen/a]+|[\u4e00-\u9fa5]+)\s+(Pass|Fail|PASS|FAIL)/i;
+    
+    for (const line of lines) {
+      const match = line.trim().match(stepRegex);
+      if (match) {
+        const [, id, item, range, testValue, result] = match;
+        const status = result.toUpperCase().includes('PASS') || result.toUpperCase().includes('Pass') ? 'PASS' : 'FAIL';
+        
+        totalTests++;
+        if (status === 'PASS') {
+          passedTests++;
+        } else {
+          failedTests++;
+        }
+
+        testCases.push({
+          id: id.trim(),
+          name: item.trim(),
+          status,
+          duration: 'N/A',
+          range: range.trim(),
+          testValue: testValue.trim()
+        });
+      }
+    }
+
+    const passRate = totalTests > 0 ? (passedTests / totalTests * 100).toFixed(2) : '0';
+
+    return {
+      success: failedTests === 0,
+      filename,
+      totalTests,
+      passedTests,
+      failedTests,
+      passRate: parseFloat(passRate),
+      duration: startTime && endTime ? 'N/A' : 'N/A',
+      errors,
+      testCases,
+      summary: {
+        totalTests,
+        passedTests,
+        failedTests,
+        passRate: parseFloat(passRate),
+        avgDuration: 'N/A',
+        startTime,
+        endTime
+      },
+      metadata
+    };
+  }
+
+  /**
    * 解析CSV/Excel格式的测试数据
-   * 支持的列名：id, name, status, result, duration, error, 耗时, 结果, etc.
-   * 
-   * @param content - CSV文本内容
-   * @param filename - 文件名
-   * @returns 解析后的分析结果
    */
   private parseExcelData(content: string, filename: string): LogAnalysisResult {
     const lines = content.split('\n').filter(l => l.trim());
@@ -314,21 +417,11 @@ export class TestLogService {
     };
   }
 
-  /**
-   * 获取测试汇总信息
-   * @param filePath - 日志文件路径
-   * @returns 测试汇总信息
-   */
   async getTestSummary(filePath: string): Promise<TestSummary> {
     const result = await this.analyzeFilePath(filePath);
     return result.summary;
   }
 
-  /**
-   * 列出目录中的所有日志文件
-   * @param directory - 要搜索的目录（默认当前目录）
-   * @returns 日志文件路径列表
-   */
   async listLogFiles(directory?: string): Promise<string[]> {
     const searchDir = directory || process.cwd();
     const files: string[] = [];
@@ -363,11 +456,6 @@ export class TestLogService {
     return files.slice(0, 100);
   }
 
-  /**
-   * 导出分析结果为CSV格式
-   * @param data - 要导出的数据数组
-   * @returns CSV格式的Buffer
-   */
   async exportToExcel(data: any[]): Promise<Buffer> {
     if (data.length === 0) {
       return Buffer.from('No data');
@@ -385,10 +473,6 @@ export class TestLogService {
     return Buffer.from(csv);
   }
 
-  /**
-   * 解析耗时字符串为毫秒数
-   * 支持格式：150ms, 1.5s, 1000ms
-   */
   private parseDuration(duration: string): number {
     const msMatch = duration.match(/(\d+)ms/);
     const sMatch = duration.match(/(\d+\.?\d*)s/);
@@ -398,25 +482,16 @@ export class TestLogService {
     return 0;
   }
 
-  /**
-   * 格式化毫秒为可读字符串
-   */
   private formatDuration(ms: number): string {
     if (ms < 1000) return `${Math.round(ms)}ms`;
     return `${(ms / 1000).toFixed(2)}s`;
   }
 
-  /**
-   * 从日志行中提取时间戳
-   */
   private extractTimestamp(line: string): string | undefined {
     const match = line.match(/(\d{4}-\d{2}-\d{2}[T\s]\d{2}:\d{2}:\d{2})/);
     return match ? match[1] : undefined;
   }
 
-  /**
-   * 从日志行中提取错误信息
-   */
   private extractError(line: string): string | undefined {
     const errorMatch = line.match(/error[:\s]+(.+)/i);
     return errorMatch ? errorMatch[1].trim() : undefined;
