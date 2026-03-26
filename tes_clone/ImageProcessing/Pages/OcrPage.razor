@@ -1,0 +1,73 @@
+@page "/ocr"
+@layout MainLayout
+@inject OcrService Ocr
+
+<div class="card">
+    <h2>文字识别 (OCR)</h2>
+    <InputFile multiple OnChange="HandleFilesSelected" accept="image/*" />
+    
+    @if (selectedImages.Any())
+    {
+        <p>已选择 @selectedImages.Count 张图片</p>
+        <label>
+            语言: 
+            <select @bind="SelectedLanguage" style="background: #0f3460; color: #fff; padding: 5px;">
+                <option value="eng">English</option>
+                <option value="chi_sim">简体中文</option>
+                <option value="eng+chi_sim">English + 简体中文</option>
+            </select>
+        </label>
+        <div style="margin-top: 15px;">
+            <button class="btn" @onclick="RecognizeText">开始识别</button>
+            @if (selectedImages.Count > 1)
+            {
+                <button class="btn" @onclick="CombineAndRecognize" style="margin-left: 10px;">合并所有识别</button>
+            }
+        </div>
+    }
+</div>
+
+@if (result != null)
+{
+    <div class="card">
+        <h3>识别结果</h3>
+        <p>置信度: <strong style="color: #00d4ff;">@result.Confidence%</strong></p>
+        @if (!string.IsNullOrEmpty(result.Error))
+        {
+            <p style="color: #ff4444;">错误: @result.Error</p>
+        }
+        <textarea @bind="result.Text" rows="15" style="margin-top: 15px;"></textarea>
+    </div>
+}
+
+@code {
+    private List<byte[]> selectedImages = new();
+    private OcrService.OcrResult? result;
+    private string SelectedLanguage = "eng+chi_sim";
+
+    private async Task HandleFilesSelected(InputFileChangeEventArgs e)
+    {
+        var files = e.GetMultipleFiles();
+        selectedImages.Clear();
+        foreach (var file in files)
+        {
+            using var stream = file.OpenReadStream(maxAllowedSize: 10 * 1024 * 1024);
+            using var memoryStream = new MemoryStream();
+            await stream.CopyToAsync(memoryStream);
+            selectedImages.Add(memoryStream.ToArray());
+        }
+        result = null;
+    }
+
+    private void RecognizeText()
+    {
+        if (!selectedImages.Any()) return;
+        result = Ocr.RecognizeText(selectedImages.First(), SelectedLanguage);
+    }
+
+    private void CombineAndRecognize()
+    {
+        if (!selectedImages.Any()) return;
+        result = Ocr.RecognizeMultipleImages(selectedImages, SelectedLanguage);
+    }
+}

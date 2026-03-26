@@ -1,0 +1,9 @@
+<Router AppAssembly="@typeof(App).Assembly">
+    <Found Context="routeData">
+        <RouteView RouteData="@routeData" DefaultLayout="@typeof(MainLayout)" />
+    </Found>
+    <NotFound>
+        <h1>页面未找到</h1>
+        <p>请检查URL是否正确。</p>
+    </NotFound>
+</Router>

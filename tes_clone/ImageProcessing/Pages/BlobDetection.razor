@@ -1,0 +1,73 @@
+@page "/blob"
+@layout MainLayout
+@inject BlobDetectionService BlobService
+
+<div class="card">
+    <h2>斑点检测</h2>
+    <InputFile OnChange="HandleFileSelected" accept="image/*" />
+    
+    @if (selectedImageData != null)
+    {
+        <div>
+            <h4>原始图片:</h4>
+            <img src="data:image/png;base64,@Convert.ToBase64String(selectedImageData)" class="preview-img" />
+        </div>
+        
+        <div style="margin: 15px 0;">
+            <label>最小阈值: <input type="number" @bind="MinThreshold" style="width: 80px;" /></label>
+            <label style="margin-left: 15px;">最大阈值: <input type="number" @bind="MaxThreshold" style="width: 80px;" /></label>
+            <label style="margin-left: 15px;">最小面积: <input type="number" @bind="MinArea" style="width: 80px;" /></label>
+            <label style="margin-left: 15px;">最大面积: <input type="number" @bind="MaxArea" style="width: 80px;" /></label>
+        </div>
+        
+        <button class="btn" @onclick="DetectBlobs">开始检测</button>
+    }
+</div>
+
+@if (result != null)
+{
+    <div class="card">
+        <h3>检测结果</h3>
+        <p style="font-size: 24px; color: #00d4ff;">斑点总数: @result.TotalCount</p>
+        
+        @if (result.ColorCounts.Any())
+        {
+            <h4>颜色统计:</h4>
+            @foreach (var color in result.ColorCounts)
+            {
+                <p>@color.Key: <strong>@color.Value</strong></p>
+            }
+        }
+
+        @if (!string.IsNullOrEmpty(result.ProcessedImageBase64))
+        {
+            <h4>检测结果:</h4>
+            <img src="data:image/png;base64,@result.ProcessedImageBase64" class="preview-img" />
+        }
+    </div>
+}
+
+@code {
+    private byte[]? selectedImageData;
+    private BlobDetectionService.BlobResult? result;
+    private int MinThreshold = 50;
+    private int MaxThreshold = 255;
+    private int MinArea = 10;
+    private int MaxArea = 1000;
+
+    private async Task HandleFileSelected(InputFileChangeEventArgs e)
+    {
+        var file = e.File;
+        using var stream = file.OpenReadStream(maxAllowedSize: 10 * 1024 * 1024);
+        using var memoryStream = new MemoryStream();
+        await stream.CopyToAsync(memoryStream);
+        selectedImageData = memoryStream.ToArray();
+        result = null;
+    }
+
+    private void DetectBlobs()
+    {
+        if (selectedImageData == null) return;
+        result = BlobService.DetectBlobs(selectedImageData, MinThreshold, MaxThreshold, MinArea, MaxArea);
+    }
+}
