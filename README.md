@@ -1,64 +1,86 @@
 # Fullstack NestJS Template
 
-A modern fullstack application built with NestJS backend and React frontend.
+基于 NestJS 后端和 React 前端的现代化全栈应用模板。
 
-## Tech Stack
+## 技术栈
 
-### Backend
-- **NestJS** - Progressive Node.js framework
-- **TypeScript** - Type-safe JavaScript
-- **Drizzle ORM** - Lightweight TypeScript ORM
+### 后端
+- **NestJS** - 渐进式 Node.js 框架
+- **TypeScript** - 类型安全的 JavaScript
+- **Drizzle ORM** - 轻量级 TypeScript ORM
 
-### Frontend
-- **React 19** - UI library
-- **Rspack** - Fast bundler
-- **Tailwind CSS 4** - Utility-first CSS
+### 前端
+- **React 19** - UI 库
+- **Rspack** - 快速打包工具
+- **Tailwind CSS 4** - 实用优先的 CSS 框架
 
-## Quick Start
+## 快速开始
 
 ```bash
-# Install dependencies
+# 安装依赖
 npm install
 
-# Development
+# 开发模式
 npm run dev
 
-# Build for production
+# 生产构建
 npm run build:prod
 
-# Start production
+# 生产运行
 npm start
 ```
 
-## GitHub Actions
+## GitHub Actions CI/CD
 
-This project uses GitHub Actions for CI/CD.
+本项目使用 GitHub Actions 进行持续集成和部署。
 
-### Environment Variables
+### 环境变量配置
 
-Before pushing to GitHub, configure these secrets in your repository settings:
+在推送代码到 GitHub 之前，需要在仓库设置中配置以下 Secrets：
 
-| Secret Name | Description |
-|------------|-------------|
-| `DOCKERHUB_USERNAME` | Your Docker Hub username |
-| `DOCKERHUB_TOKEN` | Docker Hub access token |
+| Secret 名称 | 说明 |
+|------------|------|
+| `DOCKERHUB_USERNAME` | Docker Hub 用户名 |
+| `DOCKERHUB_TOKEN` | Docker Hub 访问令牌 |
 
-### Docker Hub Token
+### Docker Hub Token 获取步骤
 
-1. Go to https://hub.docker.com/settings/security
-2. Create an Access Token
-3. Add the token as `DOCKERHUB_TOKEN` in GitHub secrets
+1. 访问 https://hub.docker.com/settings/security
+2. 创建 Access Token
+3. 将令牌添加到 GitHub Secrets 中
 
-### Manual Deployment
+## 部署
 
-To push this project to GitHub manually:
+### Docker 部署
 
 ```bash
-cd D:\app_4jn4zcb2qc7xy
-git remote add origin https://github.com/GCE20250623/fullstack-nestjs-template.git
-git push -u origin master
+# 构建并启动容器
+docker-compose up -d
+
+# 查看日志
+docker-compose logs -f
+
+# 停止容器
+docker-compose down
 ```
 
-## License
+### 手动部署到服务器
 
-Private - All rights reserved
+```bash
+# 克隆仓库
+git clone https://github.com/GCE20250623/tes.git
+cd tes
+
+# 安装依赖
+npm install
+
+# 构建
+npm run build:prod
+
+# 运行
+npm start
+```
+
+## 许可证
+
+私有项目 - 版权所有
