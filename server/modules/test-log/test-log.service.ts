@@ -64,18 +64,17 @@ export class TestLogService {
 
     // Parse test results from log
     for (const line of lines) {
-      // Match test results patterns
       const passMatch = line.match(/✓|PASS|成功|通过|passed/i);
-      const failMatch = line.match(/✗|FAIL|失败|失败|failed/i);
+      const failMatch = line.match(/✗|FAIL|失败|失败|failed|Error/i);
       const timeMatch = line.match(/(\d+)ms|(\d+\.?\d*)s/);
-      const idMatch = line.match(/\[(\d+)\]|\((\d+)\)|#(\d+)/);
-      const nameMatch = line.match(/test[:\s]+(.+)/i);
+      const idMatch = line.match(/\[(\d+)\]|\((\d+)\)|#(\d+)|(\d+)、/);
+      const nameMatch = line.match(/test[:\s]+(.+)|(.+)测试|测试(.+)[:：]/i);
       
-      if (passMatch) {
+      if (passMatch && !failMatch) {
         totalTests++;
         passedTests++;
-        const id = idMatch ? idMatch[1] : `${totalTests}`;
-        const name = nameMatch ? nameMatch[1].trim() : `Test ${id}`;
+        const id = idMatch ? (idMatch[1] || idMatch[2] || idMatch[3] || idMatch[4]) : `${totalTests}`;
+        const name = nameMatch ? (nameMatch[1] || nameMatch[2] || nameMatch[3]).trim() : `Test ${id}`;
         const duration = timeMatch ? timeMatch[0] : '0ms';
         totalDuration += this.parseDuration(duration);
         
@@ -89,8 +88,8 @@ export class TestLogService {
       } else if (failMatch) {
         totalTests++;
         failedTests++;
-        const id = idMatch ? idMatch[1] : `${totalTests}`;
-        const name = nameMatch ? nameMatch[1].trim() : `Test ${id}`;
+        const id = idMatch ? (idMatch[1] || idMatch[2] || idMatch[3] || idMatch[4]) : `${totalTests}`;
+        const name = nameMatch ? (nameMatch[1] || nameMatch[2] || nameMatch[3]).trim() : `Test ${id}`;
         const duration = timeMatch ? timeMatch[0] : '0ms';
         const error = this.extractError(line);
         totalDuration += this.parseDuration(duration);
@@ -113,8 +112,8 @@ export class TestLogService {
       if (tsMatch) endTime = tsMatch[1];
     }
 
-    // Parse Excel data if present
-    if (filename.endsWith('.xlsx') || filename.endsWith('.xls')) {
+    // Parse Excel/CSV data if present
+    if (filename.endsWith('.xlsx') || filename.endsWith('.xls') || filename.endsWith('.csv')) {
       return this.parseExcelData(content, filename);
     }
 
@@ -143,32 +142,34 @@ export class TestLogService {
   }
 
   private parseExcelData(content: string, filename: string): LogAnalysisResult {
-    // Simple CSV/Excel text parsing
     const lines = content.split('\n').filter(l => l.trim());
-    const headers = lines[0]?.split(',') || [];
+    const headers = lines[0]?.split(/[,\t]/).map(h => h.trim().toLowerCase()) || [];
     const testCases: TestCase[] = [];
     
     let passedTests = 0;
     let failedTests = 0;
 
-    for (let i = 1; i < lines.length; i++) {
-      const values = lines[i].split(',');
-      const row: Record<string, string> = {};
-      headers.forEach((h, idx) => {
-        row[h.trim()] = values[idx]?.trim() || '';
-      });
+    // Find column indices
+    const idIdx = headers.findIndex(h => h.includes('id') || h.includes('编号'));
+    const nameIdx = headers.findIndex(h => h.includes('name') || h.includes('名称') || h.includes('测试名'));
+    const statusIdx = headers.findIndex(h => h.includes('status') || h.includes('结果') || h.includes('状态'));
+    const durationIdx = headers.findIndex(h => h.includes('duration') || h.includes('耗时') || h.includes('时间'));
 
-      const status = (row['status'] || row['结果'] || row['Result'] || '').toUpperCase();
-      const isPass = status.includes('PASS') || status.includes('成功') || status.includes('通过');
+    for (let i = 1; i < lines.length; i++) {
+      const values = lines[i].split(/[,\t]/).map(v => v.trim());
+      
+      const status = (values[statusIdx] || '').toUpperCase();
+      const isPass = status.includes('PASS') || status.includes('成功') || status.includes('通过') || status === 'OK';
+      const isFail = status.includes('FAIL') || status.includes('失败') || status.includes('错误');
       
       if (isPass) passedTests++;
-      else if (status.includes('FAIL') || status.includes('失败')) failedTests++;
+      else if (isFail) failedTests++;
 
       testCases.push({
-        id: row['id'] || row['ID'] || `${i}`,
-        name: row['name'] || row['测试名称'] || row['Test Name'] || `Test ${i}`,
-        status: isPass ? 'PASS' : (status.includes('FAIL') ? 'FAIL' : 'SKIP'),
-        duration: row['duration'] || row['耗时'] || row['Duration'] || '0ms'
+        id: values[idIdx] || `${i}`,
+        name: values[nameIdx] || `Test ${i}`,
+        status: isPass ? 'PASS' : (isFail ? 'FAIL' : 'SKIP'),
+        duration: values[durationIdx] || '0ms'
       });
     }
 
@@ -211,12 +212,16 @@ export class TestLogService {
         const items = fs.readdirSync(dir);
         for (const item of items) {
           const fullPath = path.join(dir, item);
-          const stat = fs.statSync(fullPath);
-          
-          if (stat.isDirectory() && !item.startsWith('.')) {
-            search(fullPath);
-          } else if (extensions.some(ext => item.endsWith(ext))) {
-            files.push(fullPath);
+          try {
+            const stat = fs.statSync(fullPath);
+            
+            if (stat.isDirectory() && !item.startsWith('.') && !item.startsWith('node_modules')) {
+              search(fullPath);
+            } else if (extensions.some(ext => item.endsWith(ext))) {
+              files.push(fullPath);
+            }
+          } catch (e) {
+            // Skip inaccessible files
           }
         }
       } catch (e) {
@@ -225,11 +230,10 @@ export class TestLogService {
     };
     
     search(searchDir);
-    return files.slice(0, 100); // Limit to 100 files
+    return files.slice(0, 100);
   }
 
   async exportToExcel(data: any[]): Promise<Buffer> {
-    // Generate simple CSV as Excel-compatible format
     if (data.length === 0) {
       return Buffer.from('No data');
     }
@@ -263,7 +267,7 @@ export class TestLogService {
   }
 
   private extractError(line: string): string | undefined {
-    const errorMatch = line.match(/error[:\s]+(.+)/i);
+    const errorMatch = line.match(/error[:\s]+(.+)/i) || line.match(/Error[:\s](.+)/i);
     return errorMatch ? errorMatch[1].trim() : undefined;
   }
 }
