@@ -1,0 +1,46 @@
+version: '3.8'
+
+services:
+  app:
+    image: ${DOCKER_IMAGE:-qinghaozeng/fullstack-nestjs-template:latest}
+    container_name: fullstack-app
+    ports:
+      - "${SERVER_PORT:-3000}:3000"
+    environment:
+      - NODE_ENV=production
+      - SERVER_PORT=3000
+      - SUDA_DATABASE_URL=${SUDA_DATABASE_URL}
+      - LOG_REQUEST_BODY=false
+      - LOG_RESPONSE_BODY=false
+    depends_on:
+      db:
+        condition: service_healthy
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost:3000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+  db:
+    image: postgres:16-alpine
+    container_name: fullstack-db
+    environment:
+      - POSTGRES_USER=${DB_USER:-postgres}
+      - POSTGRES_PASSWORD=${DB_PASSWORD:-postgres}
+      - POSTGRES_DB=${DB_NAME:-appdb}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  postgres_data:
+    driver: local

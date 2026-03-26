@@ -1,0 +1,59 @@
+services:
+  # Application service
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: app
+    ports:
+      - "3000:3000"
+    environment:
+      - NODE_ENV=production
+      - SERVER_PORT=3000
+      - SERVER_HOST=0.0.0.0
+      - SUDA_DATABASE_URL=postgresql://postgres:postgres@db:5432/appdb
+      - LOG_REQUEST_BODY=false
+      - LOG_RESPONSE_BODY=false
+    depends_on:
+      db:
+        condition: service_healthy
+    restart: unless-stopped
+    networks:
+      - app-network
+    healthcheck:
+      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost:3000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+  # PostgreSQL database
+  db:
+    image: postgres:16-alpine
+    container_name: app-db
+    environment:
+      - POSTGRES_USER=postgres
+      - POSTGRES_PASSWORD=postgres
+      - POSTGRES_DB=appdb
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"
+    restart: unless-stopped
+    networks:
+      - app-network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+# Volumes for persistent data
+volumes:
+  postgres_data:
+    driver: local
+
+# Networks
+networks:
+  app-network:
+    driver: bridge
