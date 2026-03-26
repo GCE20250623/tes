@@ -3,71 +3,237 @@
 @inject BlobDetectionService BlobService
 
 <div class="card">
-    <h2>斑点检测</h2>
+    <h2>🔍 斑点检测</h2>
+    <p>使用 OpenCvSharp 分析图像中的斑点数量和颜色</p>
+</div>
+
+<div class="card">
+    <h3>📤 上传图片</h3>
     <InputFile OnChange="HandleFileSelected" accept="image/*" />
     
     @if (selectedImageData != null)
     {
-        <div>
-            <h4>原始图片:</h4>
-            <img src="data:image/png;base64,@Convert.ToBase64String(selectedImageData)" class="preview-img" />
+        <div class="preview-section">
+            <div class="preview-box">
+                <h4>原始图片</h4>
+                <img src="data:image/png;base64,@originalImageBase64" class="preview-img" />
+            </div>
+            
+            @if (!string.IsNullOrEmpty(result?.ProcessedImageBase64))
+            {
+                <div class="preview-box">
+                    <h4>检测结果</h4>
+                    <img src="data:image/png;base64,@result.ProcessedImageBase64" class="preview-img" />
+                </div>
+            }
         </div>
-        
-        <div style="margin: 15px 0;">
-            <label>最小阈值: <input type="number" @bind="MinThreshold" style="width: 80px;" /></label>
-            <label style="margin-left: 15px;">最大阈值: <input type="number" @bind="MaxThreshold" style="width: 80px;" /></label>
-            <label style="margin-left: 15px;">最小面积: <input type="number" @bind="MinArea" style="width: 80px;" /></label>
-            <label style="margin-left: 15px;">最大面积: <input type="number" @bind="MaxArea" style="width: 80px;" /></label>
+
+        <div class="settings-section">
+            <h3>⚙️ 检测参数</h3>
+            <div class="settings-grid">
+                <div class="setting-item">
+                    <label>最小阈值</label>
+                    <input type="number" @bind="Settings.MinThreshold" min="0" max="255" />
+                </div>
+                <div class="setting-item">
+                    <label>最大阈值</label>
+                    <input type="number" @bind="Settings.MaxThreshold" min="0" max="255" />
+                </div>
+                <div class="setting-item">
+                    <label>最小面积</label>
+                    <input type="number" @bind="Settings.MinArea" min="1" max="10000" />
+                </div>
+                <div class="setting-item">
+                    <label>最大面积</label>
+                    <input type="number" @bind="Settings.MaxArea" min="100" max="100000" />
+                </div>
+                <div class="setting-item">
+                    <label>最小圆度 (0=不过滤)</label>
+                    <input type="number" @bind="Settings.FilterByCircularity" min="0" max="100" />
+                </div>
+            </div>
+
+            <button class="btn btn-primary" @onclick="DetectBlobs">
+                🎯 开始检测
+            </button>
+            <button class="btn btn-secondary" @onclick="ResetSettings">
+                🔄 重置参数
+            </button>
         </div>
-        
-        <button class="btn" @onclick="DetectBlobs">开始检测</button>
     }
 </div>
 
-@if (result != null)
+@if (isProcessing)
 {
-    <div class="card">
-        <h3>检测结果</h3>
-        <p style="font-size: 24px; color: #00d4ff;">斑点总数: @result.TotalCount</p>
+    <div class="card processing">
+        <div class="spinner"></div>
+        <p>正在处理图片...</p>
+    </div>
+}
+
+@if (result != null && !result.IsSuccess && !string.IsNullOrEmpty(result.Error))
+{
+    <div class="card error">
+        <h3>❌ 错误</h3>
+        <p>@result.Error</p>
+    </div>
+}
+
+@if (result != null && result.IsSuccess)
+{
+    <div class="card results">
+        <h3>📊 检测结果</h3>
         
-        @if (result.ColorCounts.Any())
+        <div class="stats-row">
+            <div class="stat-card primary">
+                <span class="stat-value">@result.TotalCount</span>
+                <span class="stat-label">斑点总数</span>
+            </div>
+            <div class="stat-card">
+                <span class="stat-value">@result.Blobs.Count(b => b.Color.Contains("红")).Count()</span>
+                <span class="stat-label">红色斑点</span>
+            </div>
+            <div class="stat-card">
+                <span class="stat-value">@result.Blobs.Count(b => b.Color.Contains("绿")).Count()</span>
+                <span class="stat-label">绿色斑点</span>
+            </div>
+            <div class="stat-card">
+                <span class="stat-value">@result.Blobs.Count(b => b.Color.Contains("蓝")).Count()</span>
+                <span class="stat-label">蓝色斑点</span>
+            </div>
+        </div>
+
+        @if (!string.IsNullOrEmpty(result.ImageInfo))
         {
-            <h4>颜色统计:</h4>
-            @foreach (var color in result.ColorCounts)
-            {
-                <p>@color.Key: <strong>@color.Value</strong></p>
-            }
+            <p class="image-info">ℹ️ @result.ImageInfo</p>
         }
 
-        @if (!string.IsNullOrEmpty(result.ProcessedImageBase64))
+        @if (result.ColorCounts.Any())
         {
-            <h4>检测结果:</h4>
-            <img src="data:image/png;base64,@result.ProcessedImageBase64" class="preview-img" />
+            <h4>🎨 颜色统计</h4>
+            <div class="color-grid">
+                @foreach (var color in result.ColorCounts.OrderByDescending(c => c.Value))
+                {
+                    <div class="color-item" style="background: @GetColorBg(color.Key)">
+                        <span class="color-name">@color.Key</span>
+                        <span class="color-count">@color.Value</span>
+                    </div>
+                }
+            </div>
+        }
+
+        @if (result.Blobs.Any())
+        {
+            <h4>📋 斑点详情</h4>
+            <div class="blob-table-wrapper">
+                <table class="blob-table">
+                    <thead>
+                        <tr>
+                            <th>#</th>
+                            <th>位置 (X, Y)</th>
+                            <th>尺寸</th>
+                            <th>颜色</th>
+                            <th>面积</th>
+                            <th>圆度</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        @foreach (var blob in result.Blobs.Take(50))
+                        {
+                            <tr>
+                                <td>@(result.Blobs.IndexOf(blob) + 1)</td>
+                                <td>(@blob.X, @blob.Y)</td>
+                                <td>@blob.Width × @blob.Height</td>
+                                <td style="color: @GetColorText(blob.Color)">@blob.Color</td>
+                                <td>@blob.Area</td>
+                                <td>@blob.Circularity</td>
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+                @if (result.Blobs.Count > 50)
+                {
+                    <p class="more-info">显示前 50 个，共 @result.Blobs.Count 个</p>
+                }
+            </div>
         }
     </div>
 }
 
 @code {
     private byte[]? selectedImageData;
+    private string originalImageBase64 = "";
     private BlobDetectionService.BlobResult? result;
-    private int MinThreshold = 50;
-    private int MaxThreshold = 255;
-    private int MinArea = 10;
-    private int MaxArea = 1000;
+    private bool isProcessing;
+    
+    private BlobDetectionService.DetectionSettings Settings { get; set; } = new();
+
+    protected override void OnInitialized()
+    {
+        ResetSettings();
+    }
+
+    private void ResetSettings()
+    {
+        Settings = new BlobDetectionService.DetectionSettings
+        {
+            MinThreshold = 50,
+            MaxThreshold = 255,
+            MinArea = 10,
+            MaxArea = 10000,
+            FilterByCircularity = 0,
+            DrawResults = true
+        };
+    }
 
     private async Task HandleFileSelected(InputFileChangeEventArgs e)
     {
+        isProcessing = true;
+        result = null;
+
         var file = e.File;
         using var stream = file.OpenReadStream(maxAllowedSize: 10 * 1024 * 1024);
         using var memoryStream = new MemoryStream();
         await stream.CopyToAsync(memoryStream);
         selectedImageData = memoryStream.ToArray();
-        result = null;
+        originalImageBase64 = Convert.ToBase64String(selectedImageData);
+
+        isProcessing = false;
     }
 
     private void DetectBlobs()
     {
         if (selectedImageData == null) return;
-        result = BlobService.DetectBlobs(selectedImageData, MinThreshold, MaxThreshold, MinArea, MaxArea);
+
+        isProcessing = true;
+        result = BlobService.DetectBlobs(selectedImageData, Settings);
+        isProcessing = false;
+    }
+
+    private string GetColorBg(string color)
+    {
+        return color switch
+        {
+            "红色" => "#ffcccc",
+            "绿色" => "#ccffcc",
+            "蓝色" => "#ccccff",
+            "黄色" => "#ffffcc",
+            "紫色" => "#ecccfc",
+            "橙色" => "#ffe5cc",
+            "白色" => "#ffffff",
+            "黑色" => "#333333",
+            "灰色" => "#cccccc",
+            _ => "#f0f0f0"
+        };
+    }
+
+    private string GetColorText(string color)
+    {
+        return color switch
+        {
+            "白色" or "黄色" => "#333",
+            "黑色" => "#fff",
+            _ => "#00d4ff"
+        };
     }
 }

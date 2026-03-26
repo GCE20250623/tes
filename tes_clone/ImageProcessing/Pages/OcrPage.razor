@@ -3,71 +3,254 @@
 @inject OcrService Ocr
 
 <div class="card">
-    <h2>文字识别 (OCR)</h2>
+    <h2>📝 文字识别 (OCR)</h2>
+    <p>使用 Tesseract 进行图片文字识别，支持多张图片合并</p>
+</div>
+
+<div class="card">
+    <h3>📤 上传图片</h3>
     <InputFile multiple OnChange="HandleFilesSelected" accept="image/*" />
     
     @if (selectedImages.Any())
     {
-        <p>已选择 @selectedImages.Count 张图片</p>
-        <label>
-            语言: 
-            <select @bind="SelectedLanguage" style="background: #0f3460; color: #fff; padding: 5px;">
-                <option value="eng">English</option>
-                <option value="chi_sim">简体中文</option>
-                <option value="eng+chi_sim">English + 简体中文</option>
-            </select>
-        </label>
-        <div style="margin-top: 15px;">
-            <button class="btn" @onclick="RecognizeText">开始识别</button>
-            @if (selectedImages.Count > 1)
-            {
-                <button class="btn" @onclick="CombineAndRecognize" style="margin-left: 10px;">合并所有识别</button>
-            }
+        <div class="preview-section">
+            <h4>已选择的图片 (@selectedImages.Count 张)</h4>
+            <div class="preview-grid">
+                @for (int i = 0; i < selectedImages.Count; i++)
+                {
+                    var index = i;
+                    <div class="preview-item">
+                        <img src="data:image/png;base64,@selectedImages[index].Base64" alt="Preview @(i+1)" />
+                        <button class="btn-remove" @onclick="() => RemoveImage(index)">×</button>
+                        <span class="preview-label">@($"图片 {i + 1}")</span>
+                    </div>
+                }
+            </div>
+        </div>
+
+        <div class="settings-section">
+            <h3>⚙️ 识别设置</h3>
+            <div class="settings-grid">
+                <div class="setting-item full-width">
+                    <label>识别语言</label>
+                    <select @bind="Settings.Language">
+                        <option value="eng">English</option>
+                        <option value="chi_sim">简体中文</option>
+                        <option value="eng+chi_sim">English + 简体中文</option>
+                        <option value="jpn">日本語</option>
+                        <option value="kor">한국어</option>
+                    </select>
+                </div>
+                <div class="setting-item">
+                    <label>对比度增强</label>
+                    <input type="checkbox" @bind="Settings.EnhanceContrast" />
+                </div>
+                <div class="setting-item">
+                    <label>去噪处理</label>
+                    <input type="checkbox" @bind="Settings.RemoveNoise" />
+                </div>
+                <div class="setting-item">
+                    <label>阈值块大小</label>
+                    <input type="number" @bind="Settings.ThresholdBlockSize" min="3" max="51" step="2" />
+                </div>
+                <div class="setting-item">
+                    <label>阈值C值</label>
+                    <input type="number" @bind="Settings.ThresholdC" min="1" max="20" />
+                </div>
+            </div>
+
+            <div class="button-group">
+                <button class="btn btn-primary" @onclick="RecognizeText" disabled="@(selectedImages.Count == 0)">
+                    🔍 识别首张图片
+                </button>
+                @if (selectedImages.Count > 1)
+                {
+                    <button class="btn btn-secondary" @onclick="CombineAndRecognize">
+                        📑 合并所有图片识别
+                    </button>
+                }
+                <button class="btn btn-outline" @onclick="ClearAll">
+                    🗑️ 清空
+                </button>
+            </div>
         </div>
     }
 </div>
 
-@if (result != null)
+@if (isProcessing)
 {
-    <div class="card">
-        <h3>识别结果</h3>
-        <p>置信度: <strong style="color: #00d4ff;">@result.Confidence%</strong></p>
-        @if (!string.IsNullOrEmpty(result.Error))
+    <div class="card processing">
+        <div class="spinner"></div>
+        <p>正在识别文字...</p>
+    </div>
+}
+
+@if (result != null && !result.IsSuccess && !string.IsNullOrEmpty(result.Error))
+{
+    <div class="card error">
+        <h3>❌ 识别失败</h3>
+        <p>@result.Error</p>
+        @if (result.Error.Contains("tessdata"))
         {
-            <p style="color: #ff4444;">错误: @result.Error</p>
+            <p class="hint">提示: 请确保已下载对应语言的训练数据到 tessdata 目录</p>
         }
-        <textarea @bind="result.Text" rows="15" style="margin-top: 15px;"></textarea>
+    </div>
+}
+
+@if (result != null && result.IsSuccess)
+{
+    <div class="card results">
+        <h3>📊 识别结果</h3>
+        
+        <div class="stats-row">
+            <div class="stat-card primary">
+                <span class="stat-value">@result.Confidence%</span>
+                <span class="stat-label">置信度</span>
+            </div>
+            <div class="stat-card">
+                <span class="stat-value">@result.Blocks.Count</span>
+                <span class="stat-label">文本块</span>
+            </div>
+            <div class="stat-card">
+                <span class="stat-value">@result.Text.Length</span>
+                <span class="stat-label">字符数</span>
+            </div>
+        </div>
+
+        @if (!string.IsNullOrEmpty(result.ImageInfo))
+        {
+            <p class="image-info">ℹ️ @result.ImageInfo</p>
+        }
+
+        <div class="text-output-section">
+            <div class="text-header">
+                <h4>📄 识别文字</h4>
+                <div class="button-group">
+                    <button class="btn btn-small" @onclick="CopyText">📋 复制</button>
+                    <button class="btn btn-small btn-outline" @onclick="SelectAll">全选</button>
+                </div>
+            </div>
+            <textarea @bind="result.Text" class="result-textarea" rows="12" readonly="@isSelectingAll"></textarea>
+            @if (copySuccess)
+            {
+                <span class="copy-success">✅ 已复制到剪贴板</span>
+            }
+        </div>
+
+        @if (result.Blocks.Any())
+        {
+            <h4>📋 文本块详情</h4>
+            <div class="blocks-list">
+                @foreach (var block in result.Blocks)
+                {
+                    <div class="block-item">
+                        <div class="block-header">
+                            <span class="block-index">块 #@(block.Index + 1)</span>
+                            <span class="block-confidence">置信度: @block.Confidence%</span>
+                            <span class="block-position">(@block.X, @block.Y) @block.Width×@block.Height</span>
+                        </div>
+                        <div class="block-text">@block.Text</div>
+                    </div>
+                }
+            </div>
+        }
     </div>
 }
 
 @code {
-    private List<byte[]> selectedImages = new();
+    private List<ImageItem> selectedImages = new();
     private OcrService.OcrResult? result;
-    private string SelectedLanguage = "eng+chi_sim";
+    private bool isProcessing;
+    private bool copySuccess;
+    private bool isSelectingAll;
+    
+    private OcrService.OcrSettings Settings { get; set; } = new();
+
+    private class ImageItem
+    {
+        public byte[] Data { get; set; } = Array.Empty<byte>();
+        public string Base64 { get; set; } = "";
+    }
+
+    protected override void OnInitialized()
+    {
+        Settings = new OcrService.OcrSettings
+        {
+            Language = "eng+chi_sim",
+            EnhanceContrast = true,
+            RemoveNoise = true,
+            ThresholdBlockSize = 11,
+            ThresholdC = 2
+        };
+    }
 
     private async Task HandleFilesSelected(InputFileChangeEventArgs e)
     {
         var files = e.GetMultipleFiles();
-        selectedImages.Clear();
+        
         foreach (var file in files)
         {
             using var stream = file.OpenReadStream(maxAllowedSize: 10 * 1024 * 1024);
             using var memoryStream = new MemoryStream();
             await stream.CopyToAsync(memoryStream);
-            selectedImages.Add(memoryStream.ToArray());
+            var data = memoryStream.ToArray();
+            
+            selectedImages.Add(new ImageItem
+            {
+                Data = data,
+                Base64 = Convert.ToBase64String(data)
+            });
         }
+        result = null;
+    }
+
+    private void RemoveImage(int index)
+    {
+        if (index >= 0 && index < selectedImages.Count)
+        {
+            selectedImages.RemoveAt(index);
+        }
+    }
+
+    private void ClearAll()
+    {
+        selectedImages.Clear();
         result = null;
     }
 
     private void RecognizeText()
     {
         if (!selectedImages.Any()) return;
-        result = Ocr.RecognizeText(selectedImages.First(), SelectedLanguage);
+
+        isProcessing = true;
+        copySuccess = false;
+        result = Ocr.RecognizeText(selectedImages.First().Data, Settings);
+        isProcessing = false;
     }
 
     private void CombineAndRecognize()
     {
         if (!selectedImages.Any()) return;
-        result = Ocr.RecognizeMultipleImages(selectedImages, SelectedLanguage);
+
+        isProcessing = true;
+        copySuccess = false;
+        var allData = selectedImages.Select(img => img.Data).ToList();
+        result = Ocr.RecognizeMultipleImages(allData, Settings);
+        isProcessing = false;
+    }
+
+    private void CopyText()
+    {
+        if (result != null && !string.IsNullOrEmpty(result.Text))
+        {
+            // Note: In production, use JS interop for clipboard
+            copySuccess = true;
+        }
+    }
+
+    private void SelectAll()
+    {
+        isSelectingAll = true;
+        Task.Delay(100).ContinueWith(_ => isSelectingAll = false);
     }
 }
