@@ -1,0 +1,11 @@
+id,name,status,duration,error
+001,User Login,PASS,150ms,
+002,Product Search,PASS,230ms,
+003,Add to Cart,FAIL,500ms,Database connection failed
+004,Checkout Process,PASS,1200ms,
+005,Payment Processing,PASS,800ms,
+006,Order Confirmation,FAIL,300ms,Email timeout
+007,User Profile Update,PASS,180ms,
+008,Password Change,PASS,200ms,
+009,Logout,PASS,100ms,
+010,Session Management,PASS,150ms,

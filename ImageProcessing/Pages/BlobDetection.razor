@@ -1,0 +1,365 @@
+@**
+ * 斑点检测页面 (Blob Detection Page)
+ * 
+ * 功能说明：
+ * - 上传图片进行斑点检测
+ * - 配置检测参数（阈值、面积、圆度）
+ * - 显示检测结果统计和可视化图片
+ * - 展示每个斑点的详细信息表格
+ * 
+ * 页面路由：/blob
+ *_
+
+@page "/blob"
+@layout MainLayout
+@inject BlobDetectionService BlobService
+
+<div class="card">
+    @* 页面标题 *@
+    <h2>🔍 斑点检测</h2>
+    <p>使用 OpenCvSharp 分析图像中的斑点数量和颜色</p>
+</div>
+
+@* 上传图片区域 *@
+<div class="card">
+    <h3>📤 上传图片</h3>
+    
+    @* 文件选择输入 *@
+    <InputFile OnChange="HandleFileSelected" accept="image/*" />
+    
+    @* 如果已选择图片，显示预览和参数设置 *@
+    @if (selectedImageData != null)
+    {
+        @* 图片预览区域 - 左右并排显示原始图和结果图 *@
+        <div class="preview-section">
+            <div class="preview-box">
+                <h4>原始图片</h4>
+                <img src="data:image/png;base64,@originalImageBase64" class="preview-img" />
+            </div>
+            
+            @* 如果有检测结果，显示处理后的图片 *@
+            @if (!string.IsNullOrEmpty(result?.ProcessedImageBase64))
+            {
+                <div class="preview-box">
+                    <h4>检测结果</h4>
+                    <img src="data:image/png;base64,@result.ProcessedImageBase64" class="preview-img" />
+                </div>
+            }
+        </div>
+
+        @* 检测参数设置区域 *@
+        <div class="settings-section">
+            <h3>⚙️ 检测参数</h3>
+            
+            @* 参数网格布局 *@
+            <div class="settings-grid">
+                @* 最小阈值：用于二值化的最小值 *@
+                <div class="setting-item">
+                    <label>最小阈值</label>
+                    <input type="number" @bind="Settings.MinThreshold" min="0" max="255" />
+                    <span class="hint">二值化最小值 (0-255)</span>
+                </div>
+                
+                @* 最大阈值：用于二值化的最大值 *@
+                <div class="setting-item">
+                    <label>最大阈值</label>
+                    <input type="number" @bind="Settings.MaxThreshold" min="0" max="255" />
+                    <span class="hint">二值化最大值 (0-255)</span>
+                </div>
+                
+                @* 最小面积：小于此面积的斑点会被忽略 *@
+                <div class="setting-item">
+                    <label>最小面积</label>
+                    <input type="number" @bind="Settings.MinArea" min="1" max="10000" />
+                    <span class="hint">过滤小斑点 (像素²)</span>
+                </div>
+                
+                @* 最大面积：大于此面积的斑点会被忽略 *@
+                <div class="setting-item">
+                    <label>最大面积</label>
+                    <input type="number" @bind="Settings.MaxArea" min="100" max="100000" />
+                    <span class="hint">过滤大斑点 (像素²)</span>
+                </div>
+                
+                @* 圆度过滤：0表示不过滤，其他值表示最小圆度要求 *@
+                <div class="setting-item">
+                    <label>最小圆度 (0=不过滤)</label>
+                    <input type="number" @bind="Settings.FilterByCircularity" min="0" max="100" />
+                    <span class="hint">0-100，越接近100越圆</span>
+                </div>
+            </div>
+
+            @* 操作按钮 *@
+            <div class="button-group">
+                <button class="btn btn-primary" @onclick="DetectBlobs">
+                    🎯 开始检测
+                </button>
+                <button class="btn btn-secondary" @onclick="ResetSettings">
+                    🔄 重置参数
+                </button>
+            </div>
+        </div>
+    }
+</div>
+
+@* 加载中状态 *@
+@if (isProcessing)
+{
+    <div class="card processing">
+        <div class="spinner"></div>
+        <p>正在处理图片...</p>
+    </div>
+}
+
+@* 错误提示 *@
+@if (result != null && !result.IsSuccess && !string.IsNullOrEmpty(result.Error))
+{
+    <div class="card error">
+        <h3>❌ 错误</h3>
+        <p>@result.Error</p>
+    </div>
+}
+
+@* 检测结果展示 *@
+@if (result != null && result.IsSuccess)
+{
+    <div class="card results">
+        <h3>📊 检测结果</h3>
+        
+        @* 统计卡片行 *@
+        <div class="stats-row">
+            @* 斑点总数 - 主卡片样式 *@
+            <div class="stat-card primary">
+                <span class="stat-value">@result.TotalCount</span>
+                <span class="stat-label">斑点总数</span>
+            </div>
+            @* 红色斑点数量 *@
+            <div class="stat-card">
+                <span class="stat-value">@result.Blobs.Count(b => b.Color.Contains("红")).Count()</span>
+                <span class="stat-label">红色斑点</span>
+            </div>
+            @* 绿色斑点数量 *@
+            <div class="stat-card">
+                <span class="stat-value">@result.Blobs.Count(b => b.Color.Contains("绿")).Count()</span>
+                <span class="stat-label">绿色斑点</span>
+            </div>
+            @* 蓝色斑点数量 *@
+            <div class="stat-card">
+                <span class="stat-value">@result.Blobs.Count(b => b.Color.Contains("蓝")).Count()</span>
+                <span class="stat-label">蓝色斑点</span>
+            </div>
+        </div>
+
+        @* 图片基本信息 *@
+        @if (!string.IsNullOrEmpty(result.ImageInfo))
+        {
+            <p class="image-info">ℹ️ @result.ImageInfo</p>
+        }
+
+        @* 颜色统计网格 *@
+        @if (result.ColorCounts.Any())
+        {
+            <h4>🎨 颜色统计</h4>
+            <div class="color-grid">
+                @foreach (var color in result.ColorCounts.OrderByDescending(c => c.Value))
+                {
+                    @* 根据颜色名称显示不同的背景色 *@
+                    <div class="color-item" style="background: @GetColorBg(color.Key)">
+                        <span class="color-name">@color.Key</span>
+                        <span class="color-count">@color.Value</span>
+                    </div>
+                }
+            </div>
+        }
+
+        @* 斑点详情表格 *@
+        @if (result.Blobs.Any())
+        {
+            <h4>📋 斑点详情</h4>
+            <div class="blob-table-wrapper">
+                <table class="blob-table">
+                    <thead>
+                        <tr>
+                            <th>#</th>
+                            <th>位置 (X, Y)</th>
+                            <th>尺寸</th>
+                            <th>颜色</th>
+                            <th>面积</th>
+                            <th>圆度</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        @* 只显示前50条 *@
+                        @foreach (var blob in result.Blobs.Take(50))
+                        {
+                            <tr>
+                                <td>@(result.Blobs.IndexOf(blob) + 1)</td>
+                                <td>(@blob.X, @blob.Y)</td>
+                                <td>@blob.Width × @blob.Height</td>
+                                <td style="color: @GetColorText(blob.Color)">@blob.Color</td>
+                                <td>@blob.Area</td>
+                                <td>@blob.Circularity</td>
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+                @if (result.Blobs.Count > 50)
+                {
+                    <p class="more-info">显示前 50 个，共 @result.Blobs.Count 个</p>
+                }
+            </div>
+        }
+    </div>
+}
+
+@code {
+    // ==================== 组件状态 ====================
+    
+    /// <summary>原始图片数据（字节数组）</summary>
+    private byte[]? selectedImageData;
+    
+    /// <summary>原始图片的Base64编码（用于显示）</summary>
+    private string originalImageBase64 = "";
+    
+    /// <summary>检测结果</summary>
+    private BlobDetectionService.BlobResult? result;
+    
+    /// <summary>是否正在处理中</summary>
+    private bool isProcessing;
+    
+    /// <summary>检测参数配置</summary>
+    private BlobDetectionService.DetectionSettings Settings { get; set; } = new();
+
+    // ==================== 生命周期方法 ====================
+
+    /// <summary>
+    /// 组件初始化时设置默认参数
+    /// </summary>
+    protected override void OnInitialized()
+    {
+        ResetSettings();
+    }
+
+    // ==================== 事件处理 ====================
+
+    /// <summary>
+    /// 处理文件选择事件
+    /// 当用户选择图片文件时调用
+    /// </summary>
+    private async Task HandleFileSelected(InputFileChangeEventArgs e)
+    {
+        isProcessing = true;
+        result = null;
+        errorMessage = "";
+
+        try
+        {
+            var file = e.File;
+            
+            // 限制文件大小：最大10MB
+            if (file.Size > 10 * 1024 * 1024)
+            {
+                errorMessage = "文件大小超过10MB限制";
+                isProcessing = false;
+                return;
+            }
+
+            // 读取文件内容到内存流
+            using var stream = file.OpenReadStream(maxAllowedSize: 10 * 1024 * 1024);
+            using var memoryStream = new MemoryStream();
+            await stream.CopyToAsync(memoryStream);
+            
+            // 保存图片数据
+            selectedImageData = memoryStream.ToArray();
+            originalImageBase64 = Convert.ToBase64String(selectedImageData);
+        }
+        catch (Exception ex)
+        {
+            errorMessage = $"读取文件失败: {ex.Message}";
+        }
+        finally
+        {
+            isProcessing = false;
+        }
+    }
+
+    /// <summary>
+    /// 执行斑点检测
+    /// </summary>
+    private void DetectBlobs()
+    {
+        if (selectedImageData == null) return;
+
+        isProcessing = true;
+
+        try
+        {
+            // 调用服务进行检测
+            result = BlobService.DetectBlobs(selectedImageData, Settings);
+        }
+        catch (Exception ex)
+        {
+            errorMessage = $"检测出错: {ex.Message}";
+        }
+        finally
+        {
+            isProcessing = false;
+        }
+    }
+
+    /// <summary>
+    /// 重置参数为默认值
+    /// </summary>
+    private void ResetSettings()
+    {
+        Settings = new BlobDetectionService.DetectionSettings
+        {
+            MinThreshold = 50,
+            MaxThreshold = 255,
+            MinArea = 10,
+            MaxArea = 10000,
+            FilterByCircularity = 0,
+            DrawResults = true
+        };
+    }
+
+    // ==================== 辅助方法 ====================
+
+    /// <summary>
+    /// 获取颜色对应的背景色
+    /// 用于颜色统计网格的显示
+    /// </summary>
+    private string GetColorBg(string color)
+    {
+        return color switch
+        {
+            "红色" => "#ffcccc",
+            "绿色" => "#ccffcc",
+            "蓝色" => "#ccccff",
+            "黄色" => "#ffffcc",
+            "紫色" => "#ecccfc",
+            "橙色" => "#ffe5cc",
+            "白色" => "#ffffff",
+            "黑色" => "#333333",
+            "灰色" => "#cccccc",
+            _ => "#f0f0f0"
+        };
+    }
+
+    /// <summary>
+    /// 获取颜色对应的文字颜色
+    /// 深色背景用浅色文字，浅色背景用深色文字
+    /// </summary>
+    private string GetColorText(string color)
+    {
+        return color switch
+        {
+            "白色" or "黄色" => "#333",
+            "黑色" => "#fff",
+            _ => "#00d4ff"
+        };
+    }
+
+    /// <summary>错误消息</summary>
+    private string errorMessage = "";
+}
